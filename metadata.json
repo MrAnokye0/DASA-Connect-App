@@ -1,0 +1,6 @@
+{
+  "name": "DASA Connect",
+  "description": "The official mobile companion app for Digital Assets Summit Africa (DASA), supporting agenda tracking, speaker directories, QR digital badges, networking, and a Gemini-powered AI Event Assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
