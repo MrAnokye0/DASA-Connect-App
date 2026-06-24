@@ -11,7 +11,14 @@ data class UserProfile(
     val title: String,
     val role: String, // "Delegate", "Speaker", "Sponsor", "Volunteer", "Admin"
     val qrCodeContent: String,
-    val isLoggedIn: Boolean = false
+    val isLoggedIn: Boolean = false,
+    val bio: String = "",
+    val networkingPrefs: String = "Open to Network",
+    val phone: String = "",
+    val linkedin: String = "",
+    val twitter: String = "",
+    val github: String = "",
+    val cardTheme: String = "Gold Premium"
 )
 
 @Entity(tableName = "sessions")

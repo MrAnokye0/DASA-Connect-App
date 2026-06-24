@@ -91,12 +91,26 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             repository.seedDataIfEmpty()
+            repository.syncWithRemoteBackend()
         }
     }
 
-    fun registerUser(name: String, email: String, company: String, title: String, role: String) {
+    fun registerUser(
+        name: String, 
+        email: String, 
+        company: String, 
+        title: String, 
+        role: String,
+        bio: String = "",
+        networkingPrefs: String = "Open to Network",
+        phone: String = "",
+        linkedin: String = "",
+        twitter: String = "",
+        github: String = "",
+        cardTheme: String = "Gold Premium"
+    ) {
         viewModelScope.launch {
-            val badgeContent = "DASA-2026|$name|$email|$company|$role"
+            val badgeContent = "DASA-2026|$name|$email|$company|$role|$networkingPrefs|$linkedin"
             val profile = UserProfile(
                 email = email,
                 name = name,
@@ -104,7 +118,14 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
                 title = title,
                 role = role,
                 qrCodeContent = badgeContent,
-                isLoggedIn = true
+                isLoggedIn = true,
+                bio = bio,
+                networkingPrefs = networkingPrefs,
+                phone = phone,
+                linkedin = linkedin,
+                twitter = twitter,
+                github = github,
+                cardTheme = cardTheme
             )
             repository.saveUserProfile(profile)
         }

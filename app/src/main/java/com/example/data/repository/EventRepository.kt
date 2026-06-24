@@ -1,5 +1,7 @@
 package com.example.data.repository
 
+import android.util.Log
+import com.example.data.api.*
 import com.example.data.db.*
 import com.example.data.model.*
 import kotlinx.coroutines.flow.Flow
@@ -18,7 +20,37 @@ class EventRepository(private val db: AppDatabase) {
     suspend fun getUserProfileDirect(): UserProfile? = db.userProfileDao().getUserProfileDirect()
 
     suspend fun saveUserProfile(profile: UserProfile) {
+        // 1. Save to local SQLite (Room) database for instant offline UI update
         db.userProfileDao().saveUserProfile(profile)
+
+        // 2. Perform optimistic background sync to MySQL backend
+        try {
+            Log.d("DASA_SYNC", "Syncing user profile with MySQL backend...")
+            val response = RetrofitClient.api.saveProfile(
+                ProfileRequest(
+                    email = profile.email,
+                    name = profile.name,
+                    company = profile.company,
+                    title = profile.title,
+                    role = profile.role,
+                    qrCodePayload = profile.qrCodeContent,
+                    bio = profile.bio,
+                    networkingPrefs = profile.networkingPrefs,
+                    phone = profile.phone,
+                    linkedin = profile.linkedin,
+                    twitter = profile.twitter,
+                    github = profile.github,
+                    cardTheme = profile.cardTheme
+                )
+            )
+            if (response.success) {
+                Log.d("DASA_SYNC", "✓ User profile synced successfully with MySQL database!")
+            } else {
+                Log.w("DASA_SYNC", "⚠️ Backend rejected profile sync: ${response.message}")
+            }
+        } catch (e: Exception) {
+            Log.e("DASA_SYNC", "❌ Offline: Profile saved locally. MySQL sync deferred: ${e.message}")
+        }
     }
 
     suspend fun logout() {
@@ -26,11 +58,111 @@ class EventRepository(private val db: AppDatabase) {
     }
 
     suspend fun toggleBookmark(id: String, bookmarked: Boolean) {
+        // 1. Instantly update local database
         db.eventSessionDao().updateBookmark(id, bookmarked)
+
+        // 2. Sync bookmark state to MySQL backend (if user is logged in)
+        val profile = getUserProfileDirect()
+        if (profile != null) {
+            try {
+                Log.d("DASA_SYNC", "Syncing session bookmark $id to MySQL backend...")
+                val response = RetrofitClient.api.toggleBookmark(
+                    sessionId = id,
+                    request = BookmarkRequest(email = profile.email, bookmarked = bookmarked)
+                )
+                if (response.success) {
+                    Log.d("DASA_SYNC", "✓ Bookmark synced successfully with MySQL database!")
+                }
+            } catch (e: Exception) {
+                Log.e("DASA_SYNC", "❌ Offline: Bookmark saved locally. MySQL sync deferred: ${e.message}")
+            }
+        }
     }
 
     suspend fun submitFeedback(id: String, rating: Float, comment: String) {
+        // 1. Instantly update local database
         db.eventSessionDao().submitFeedback(id, rating, comment)
+
+        // 2. Sync feedback to MySQL backend
+        val profile = getUserProfileDirect()
+        try {
+            Log.d("DASA_SYNC", "Syncing feedback for session $id to MySQL backend...")
+            val response = RetrofitClient.api.submitFeedback(
+                sessionId = id,
+                request = FeedbackRequest(
+                    email = profile?.email,
+                    rating = rating,
+                    comment = comment
+                )
+            )
+            if (response.success) {
+                Log.d("DASA_SYNC", "✓ Feedback synced successfully with MySQL database!")
+            }
+        } catch (e: Exception) {
+            Log.e("DASA_SYNC", "❌ Offline: Feedback saved locally. MySQL sync deferred: ${e.message}")
+        }
+    }
+
+    /**
+     * Dynamic Remote Synchronization Engine
+     * Fetches up-to-date Announcements and Profile updates from the central MySQL instance and syncs local Room cache.
+     */
+    suspend fun syncWithRemoteBackend() {
+        val profile = getUserProfileDirect()
+        
+        // 1. Sync announcements from remote MySQL instance
+        try {
+            Log.d("DASA_SYNC", "Fetching announcements from MySQL backend...")
+            val announcementsResponse = RetrofitClient.api.getAnnouncements()
+            if (announcementsResponse.success && announcementsResponse.data != null) {
+                val remoteAnnouncements = announcementsResponse.data.map { remote ->
+                    Announcement(
+                        id = remote.id,
+                        title = remote.title,
+                        content = remote.content,
+                        category = remote.category,
+                        timestamp = System.currentTimeMillis() // Or parse from remote.createdAt
+                    )
+                }
+                // Overwrite local table to match MySQL broadcast records
+                db.announcementDao().clearAnnouncements()
+                remoteAnnouncements.forEach { db.announcementDao().insertAnnouncement(it) }
+                Log.d("DASA_SYNC", "✓ Synced ${remoteAnnouncements.size} announcements from MySQL!")
+            }
+        } catch (e: Exception) {
+            Log.e("DASA_SYNC", "❌ Offline: Skipped announcement MySQL sync: ${e.message}")
+        }
+
+        // 2. Sync profile updates from remote MySQL instance (if email exists locally)
+        if (profile != null) {
+            try {
+                Log.d("DASA_SYNC", "Fetching current profile status from MySQL...")
+                val profileResponse = RetrofitClient.api.getProfile(profile.email)
+                if (profileResponse.success && profileResponse.data != null) {
+                    val remote = profileResponse.data
+                    val updatedProfile = UserProfile(
+                        email = remote.email,
+                        name = remote.name,
+                        company = remote.company ?: "",
+                        title = remote.title ?: "",
+                        role = remote.role ?: "Delegate",
+                        qrCodeContent = remote.qrCodePayload ?: profile.qrCodeContent,
+                        isLoggedIn = true,
+                        bio = remote.bio ?: "",
+                        networkingPrefs = remote.networkingPrefs ?: "Open to Network",
+                        phone = remote.phone ?: "",
+                        linkedin = remote.linkedin ?: "",
+                        twitter = remote.twitter ?: "",
+                        github = remote.github ?: "",
+                        cardTheme = remote.cardTheme ?: "Gold Premium"
+                    )
+                    db.userProfileDao().saveUserProfile(updatedProfile)
+                    Log.d("DASA_SYNC", "✓ Local profile updated to match MySQL database!")
+                }
+            } catch (e: Exception) {
+                Log.e("DASA_SYNC", "❌ Offline: Deferred remote profile verification: ${e.message}")
+            }
+        }
     }
 
     suspend fun updateConnectionStatus(id: String, status: String) {
